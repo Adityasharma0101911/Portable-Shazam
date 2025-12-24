@@ -1,0 +1,9 @@
+customtkinter>=5.2.0
+Pillow>=10.0.0
+requests>=2.31.0
+soundcard>=0.4.2
+numpy>=1.24.0
+pycaw>=20230407
+comtypes>=1.2.0
+pyaudio>=0.2.14
+scipy>=1.11.0
