@@ -1,21 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 import sys
-import os
-
-block_cipher = None
 
 datas = []
 binaries = []
-hiddenimports = ['shazamio', 'soundcard', 'customtkinter', 'PIL', 'aiohttp', 'engineio.async_drivers.aiohttp']
-
-# Collect customtkinter data
+hiddenimports = ['shazamio', 'soundcard', 'customtkinter', 'PIL', 'aiohttp']
 tmp_ret = collect_all('customtkinter')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
-# OS Specific settings
-is_mac = sys.platform == 'darwin'
-is_win = sys.platform == 'win32'
 
 a = Analysis(
     ['main.py'],
@@ -27,18 +19,15 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
+    optimize=0,
 )
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
-    a.zipfiles,
     a.datas,
     [],
     name='PortableShazam',
@@ -57,7 +46,7 @@ exe = EXE(
 )
 
 # macOS Bundle
-if is_mac:
+if sys.platform == 'darwin':
     app = BUNDLE(
         exe,
         name='PortableShazam.app',
