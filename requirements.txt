@@ -3,3 +3,4 @@ Pillow>=10.0.0
 requests>=2.31.0
 soundcard>=0.4.2
 numpy>=1.24.0
+shazamio>=0.4.0
