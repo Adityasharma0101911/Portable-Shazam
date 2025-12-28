@@ -104,11 +104,20 @@ class AudioCapture:
         loopback = None
         default_speaker = sc.default_speaker()
         
+        # Helper to find loopback
+        def is_loopback(mic):
+            # Check for Windows/Soundcard specific loopback attributes
+            if getattr(mic, 'isloopback', False):
+                return True
+            # Check name for common loopback indicators (Linux/Mac)
+            name_lower = mic.name.lower()
+            return 'loopback' in name_lower or 'monitor' in name_lower
+
         if default_speaker:
             print(f"Default speaker: {default_speaker.name}")
             for mic in all_mics:
-                is_loop = getattr(mic, 'isloopback', False)
-                if is_loop:
+                if is_loopback(mic):
+                    # Try to match the loopback device to the default speaker
                     if default_speaker.name in mic.name or mic.name in default_speaker.name:
                         loopback = mic
                         break
@@ -116,8 +125,7 @@ class AudioCapture:
         # Fallback: find any loopback
         if loopback is None:
             for mic in all_mics:
-                is_loop = getattr(mic, 'isloopback', False)
-                if is_loop or 'loopback' in mic.name.lower():
+                if is_loopback(mic):
                     loopback = mic
                     break
         
