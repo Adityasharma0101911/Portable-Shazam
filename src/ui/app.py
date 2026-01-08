@@ -1,11 +1,15 @@
 """
 Main Application Window for Portable Shazam
+Enhanced with SongPi-inspired UI: blurred backgrounds, fullscreen, centered layout
 """
 import customtkinter as ctk
 import webbrowser
 import threading
 import sys
 import os
+from PIL import Image, ImageFilter, ImageTk, ImageStat
+from io import BytesIO
+import requests
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -30,7 +34,7 @@ except ImportError:
 
 
 class PortableShazamApp(ctk.CTk):
-    """Main application window"""
+    """Main application window with enhanced UI"""
     
     def __init__(self):
         super().__init__()
@@ -51,6 +55,18 @@ class PortableShazamApp(ctk.CTk):
         
         self._is_listening = False
         self._recording_thread = None
+        self._is_fullscreen = False
+        self._cursor_hide_timer = None
+        self._current_album_art_url = None
+        self._bg_image_ref = None  # Keep reference to prevent GC
+        
+        # Create background canvas for blurred effect
+        self.bg_canvas = ctk.CTkCanvas(self, bg=COLORS["bg_primary"], highlightthickness=0)
+        self.bg_canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        
+        # Main content frame (on top of background)
+        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_frame.place(x=0, y=0, relwidth=1, relheight=1)
         
         # Build UI
         self._create_header()
@@ -61,14 +77,106 @@ class PortableShazamApp(ctk.CTk):
         
         # Update audio sources
         self._update_audio_sources()
+        
+        # Bind events
+        self.bind("<Escape>", self._toggle_fullscreen)
+        self.bind("<Motion>", self._reset_cursor_timer)
+        self.bind("<Configure>", self._on_resize)
     
     def _create_api_client(self):
         """Create the ShazamIO client - no config needed, it's free!"""
         return create_client()
     
+    def _toggle_fullscreen(self, event=None):
+        """Toggle fullscreen mode"""
+        self._is_fullscreen = not self._is_fullscreen
+        self.attributes("-fullscreen", self._is_fullscreen)
+        if self._is_fullscreen:
+            self._start_cursor_hide_timer()
+    
+    def _reset_cursor_timer(self, event=None):
+        """Reset cursor hide timer on mouse movement"""
+        self.config(cursor="")  # Show cursor
+        if self._cursor_hide_timer:
+            self.after_cancel(self._cursor_hide_timer)
+        if self._is_fullscreen:
+            self._start_cursor_hide_timer()
+    
+    def _start_cursor_hide_timer(self):
+        """Start timer to hide cursor after 3 seconds"""
+        self._cursor_hide_timer = self.after(3000, self._hide_cursor)
+    
+    def _hide_cursor(self):
+        """Hide the cursor"""
+        if self._is_fullscreen:
+            self.config(cursor="none")
+    
+    def _on_resize(self, event=None):
+        """Handle window resize - refresh background"""
+        if hasattr(self, '_last_results') and self._last_results:
+            self._update_blurred_background(self._last_results[0].album_art_url)
+    
+    def _update_blurred_background(self, album_art_url: str):
+        """Download album art and set as blurred background"""
+        if not album_art_url:
+            return
+        
+        def load_and_blur():
+            try:
+                response = requests.get(album_art_url, timeout=5)
+                if response.status_code == 200:
+                    img_data = BytesIO(response.content)
+                    pil_image = Image.open(img_data).convert("RGB")
+                    
+                    # Get window size
+                    win_width = self.winfo_width()
+                    win_height = self.winfo_height()
+                    
+                    if win_width < 10 or win_height < 10:
+                        return
+                    
+                    # Resize to cover window (maintain aspect ratio)
+                    img_aspect = pil_image.width / pil_image.height
+                    win_aspect = win_width / win_height
+                    
+                    if win_aspect > img_aspect:
+                        new_width = win_width
+                        new_height = int(win_width / img_aspect)
+                    else:
+                        new_height = win_height
+                        new_width = int(win_height * img_aspect)
+                    
+                    pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    
+                    # Center crop
+                    left = (new_width - win_width) // 2
+                    top = (new_height - win_height) // 2
+                    pil_image = pil_image.crop((left, top, left + win_width, top + win_height))
+                    
+                    # Apply blur
+                    blurred = pil_image.filter(ImageFilter.GaussianBlur(radius=25))
+                    
+                    # Darken the image for better text contrast
+                    from PIL import ImageEnhance
+                    enhancer = ImageEnhance.Brightness(blurred)
+                    blurred = enhancer.enhance(0.5)
+                    
+                    # Update on main thread
+                    self.after(0, lambda: self._set_background_image(blurred))
+            except Exception as e:
+                print(f"Background blur error: {e}")
+        
+        threading.Thread(target=load_and_blur, daemon=True).start()
+    
+    def _set_background_image(self, pil_image: Image.Image):
+        """Set the blurred background image"""
+        self._bg_image_ref = ImageTk.PhotoImage(pil_image)
+        self.bg_canvas.delete("all")
+        self.bg_canvas.create_image(0, 0, anchor="nw", image=self._bg_image_ref)
+    
     def _create_header(self):
         """Create elegant centered header"""
-        self.header = ctk.CTkFrame(self, fg_color="transparent")
+        self.header = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.header.pack(fill="x", padx=SPACING["xl"], pady=(SPACING["lg"], SPACING["md"]))
         
         # Centered title section
@@ -95,7 +203,7 @@ class PortableShazamApp(ctk.CTk):
         # Subtitle
         self.app_subtitle = ctk.CTkLabel(
             self.title_frame,
-            text="Identify any song in seconds",
+            text="Identify any song in seconds • Press ESC for fullscreen",
             font=(FONTS["family"], FONTS["size_sm"]),
             text_color=COLORS["text_secondary"]
         )
@@ -104,7 +212,7 @@ class PortableShazamApp(ctk.CTk):
     def _create_audio_source_section(self):
         """Create audio source selection - just audio output devices"""
         self.source_section = ctk.CTkFrame(
-            self,
+            self.main_frame,
             fg_color=COLORS["bg_secondary"],
             corner_radius=RADIUS["lg"]
         )
@@ -170,7 +278,7 @@ class PortableShazamApp(ctk.CTk):
     
     def _create_listen_section(self):
         """Create the main listen section"""
-        self.listen_section = ctk.CTkFrame(self, fg_color="transparent")
+        self.listen_section = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.listen_section.pack(fill="x", padx=SPACING["xl"], pady=(0, SPACING["lg"]))
         
         # Level meter
@@ -215,7 +323,7 @@ class PortableShazamApp(ctk.CTk):
     def _create_results_section(self):
         """Create results display section"""
         self.results_section = ctk.CTkFrame(
-            self,
+            self.main_frame,
             fg_color=COLORS["bg_secondary"],
             corner_radius=RADIUS["lg"]
         )
@@ -237,10 +345,13 @@ class PortableShazamApp(ctk.CTk):
         
         # Initial state
         self._show_initial_state()
+        
+        # Store last results for background refresh
+        self._last_results = None
     
     def _create_footer(self):
         """Create application footer with credits"""
-        self.footer = ctk.CTkFrame(self, fg_color="transparent", height=40)
+        self.footer = ctk.CTkFrame(self.main_frame, fg_color="transparent", height=40)
         self.footer.pack(fill="x", padx=SPACING["xl"], pady=(0, SPACING["md"]))
         
         # Credits container
@@ -287,7 +398,7 @@ class PortableShazamApp(ctk.CTk):
         # Version
         self.version_text = ctk.CTkLabel(
             self.footer,
-            text="v1.0.0",
+            text="v2.0.0",
             font=(FONTS["family"], FONTS["size_xs"]),
             text_color=COLORS["text_muted"]
         )
@@ -475,6 +586,13 @@ class PortableShazamApp(ctk.CTk):
             return
         
         self.status.set_status(f"Found {len(results)} match(es)", "success")
+        
+        # Store for background refresh
+        self._last_results = results
+        
+        # Update blurred background with album art
+        if results[0].album_art_url:
+            self._update_blurred_background(results[0].album_art_url)
         
         for i, song in enumerate(results, 1):
             self.results_frame.add_result(song, i)

@@ -13,8 +13,6 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.ui.app import run_app
-
 
 def main():
     """Main entry point"""
@@ -25,9 +23,9 @@ def main():
     missing_deps = []
     
     try:
-        import customtkinter
+        import PySide6
     except ImportError:
-        missing_deps.append("customtkinter")
+        missing_deps.append("PySide6")
     
     try:
         import numpy
@@ -52,8 +50,9 @@ def main():
     print("All dependencies OK")
     print("Using ShazamIO (FREE - Unlimited!)")
     print("=" * 40)
-    print("Launching...")
+    print("Launching modern UI...")
     
+    from src.ui.app_pyside import run_app
     run_app()
 
 

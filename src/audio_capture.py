@@ -96,6 +96,7 @@ class AudioCapture:
     def _capture_with_loopback(self, duration: float, progress_callback: Optional[Callable[[float], None]] = None) -> bytes:
         """Capture using soundcard's loopback feature"""
         import soundcard as sc
+        import platform
         
         # Get all microphones including loopback devices
         all_mics = sc.all_microphones(include_loopback=True)
@@ -109,9 +110,13 @@ class AudioCapture:
             # Check for Windows/Soundcard specific loopback attributes
             if getattr(mic, 'isloopback', False):
                 return True
-            # Check name for common loopback indicators (Linux/Mac)
+            # Check name for common loopback indicators
             name_lower = mic.name.lower()
-            return 'loopback' in name_lower or 'monitor' in name_lower
+            # Windows: "Loopback"
+            # Linux: "Monitor"
+            # macOS: "BlackHole", "Soundflower", "Loopback"
+            loopback_keywords = ['loopback', 'monitor', 'blackhole', 'soundflower', 'multi-output']
+            return any(keyword in name_lower for keyword in loopback_keywords)
 
         if default_speaker:
             print(f"Default speaker: {default_speaker.name}")
@@ -130,13 +135,27 @@ class AudioCapture:
                     break
         
         if loopback is None:
-            raise AudioCaptureError("No loopback device found")
+            system = platform.system()
+            if system == "Darwin":  # macOS
+                raise AudioCaptureError(
+                    "No loopback device found on macOS.\n"
+                    "Please install BlackHole: https://github.com/ExistentialAudio/BlackHole\n"
+                    "Then set up a Multi-Output Device in Audio MIDI Setup."
+                )
+            elif system == "Linux":
+                raise AudioCaptureError(
+                    "No loopback device found on Linux.\n"
+                    "Make sure PulseAudio or PipeWire is running with monitor devices enabled."
+                )
+            else:
+                raise AudioCaptureError("No loopback device found")
         
         print(f"Capturing from: {loopback.name}")
         
         # Record audio
         total_frames = int(duration * self.sample_rate)
-        chunk_size = int(self.sample_rate * 0.5)
+        # Smaller chunks for more responsive level meter (50ms = 20 fps)
+        chunk_size = int(self.sample_rate * 0.05)
         frames_recorded = 0
         
         with loopback.recorder(samplerate=self.sample_rate, channels=self.channels) as recorder:
@@ -146,7 +165,14 @@ class AudioCapture:
                 self._recorded_data.append(data)
                 
                 if len(data) > 0:
-                    self._current_level = float(np.abs(data).max())
+                    # Smooth the level with a max to make it more visually appealing
+                    level = float(np.abs(data).max())
+                    # Smoothing: slowly decay, quickly rise
+                    if level > self._current_level:
+                        self._current_level = level
+                    else:
+                        self._current_level = self._current_level * 0.85 + level * 0.15
+                    
                     if self._level_callback:
                         self._level_callback(self._current_level)
                 
